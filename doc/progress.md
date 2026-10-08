@@ -24,3 +24,10 @@ I added a third VM named printer to the Vagrantfile. To give it a static IP, I s
 Then, I went back to the DHCP server and added a host declaration in /etc/dhcp/dhcpd.conf. I linked the MAC address (using colons) to the fixed IP 192.168.57.111 and set a default lease time of 2 hours (7200 seconds). 
 
 I restarted the DHCP service and logged into the printer. I used dhclient -r to release any old IP and dhclient to request a new one. I ran ip a and confirmed the printer got the .111 IP successfully.
+
+
+Checkpoint 5: Routing and NAT
+
+To finish the setup, I configured the Linux server to act as a router for the internal network. I enabled IP forwarding by writing 1 to /proc/sys/net/ipv4/ip_forward and uncommenting the line in /etc/sysctl.conf to make it permanent. Then, I added an iptables NAT rule to masquerade the traffic from the 192.168.57.0/24 network going out through the eth1 interface.
+
+Finally, I tested this on the client c1. I deleted its old default route and added a new default route pointing to the server's IP (192.168.57.10). I ran a ping test to 8.8.8.8, and it successfully received replies, proving that the internal clients now have internet access.

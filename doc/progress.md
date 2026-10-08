@@ -1,33 +1,64 @@
-Checkpoint 1 and 2: Server Setup
+Server Setup and DHCP Installation
+First, I created the Vagrantfile defining a Debian server with two adapters (a public bridge and a private intnet with IP 192.168.57.10).
+I installed the DHCP server with:
+sudo apt update
+sudo apt install isc-dhcp-server -y
 
-To start, I made the Vagrantfile using a Debian box. I configured two network adapters: a public one (bridge) so the machine has internet, and a private one for the intnet network with the IP 192.168.57.10. 
+I configured the service to listen on the eth2 interface in /etc/default/isc-dhcp-server.
 
-After booting the server, I installed the DHCP package (isc-dhcp-server). I checked my interfaces with ip a and saw that the internal one was eth2, so I added that to /etc/default/isc-dhcp-server. 
+DHCP Configuration
+Before modifying the main file, I made a backup:
+sudo cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.bak
 
-Before touching the main config file, I made a backup just in case. In /etc/dhcp/dhcpd.conf, I changed the default lease time to 1 day and the max to 8 days. I also set my domain to samuel.test. For the IP distribution, I created a subnet for 192.168.57.0/24 and told it to give dynamic IPs from .20 to .50. 
+I added the following configuration to /etc/dhcp/dhcpd.conf:
+default-lease-time 86400;
+max-lease-time 691200;
+option domain-name "samuel.test";
+option domain-name-servers 10.0.0.2, 4.4.4.4;
 
-To finish, I ran dhcpd -t to make sure I didn't have any syntax errors, restarted the service, and checked the status. Everything was green and running.
+subnet 192.168.57.0 netmask 255.255.255.0 {
+range 192.168.57.20 192.168.57.50;
+}
 
+I checked the syntax with sudo dhcpd -t (no errors were shown) and restarted the service:
+sudo systemctl restart isc-dhcp-server.service
+Everything was active and listening.
 
-Checkpoint 3: Client Configuration
+Client 1 Configuration
+I connected the c1 machine to the internal network to obtain its IP automatically. I checked its network with:
+ip a
+It received an IP between .20 and .50 successfully.
 
-I added a new virtual machine called c1 to my Vagrantfile. I connected it to the same internal network (intnet) but configured it to use DHCP to get its IP automatically. 
+On the server, I verified the lease database:
+cat /var/lib/dhcp/dhcpd.leases
+The output confirmed the active lease for c1:
+binding state active;
+client-hostname "c1";
 
-When I started c1 and ran ip a, I saw that it got an IP address from the dynamic range I created earlier (it gave me an IP between .20 and .50). 
+Printer Reservation
+For the printer, I assigned the MAC address 080027112233 in the Vagrantfile.
+In the server, I created this MAC-based reservation:
+host printer {
+hardware ethernet 08:00:27:11:22:33;
+fixed-address 192.168.57.111;
+default-lease-time 7200;
+}
 
-To be completely sure it worked, I went back to the server terminal and checked the file /var/lib/dhcp/dhcpd.leases. I found the lease for c1 right there. I also checked the syslog and saw the four DHCP communication steps (Discover, Offer, Request, and Ack).
+I restarted the DHCP service. On the printer, I renewed the IP:
+sudo dhclient -r
+sudo dhclient
+When I used ip a, the printer had the correct 192.168.57.111 IP. The reservation was working.
 
-Checkpoint 4: Fixed IP Address Based on MAC
+Routing and NAT
+To give internet access to the clients, I configured the Linux server as a router. I enabled IPv4 forwarding and configured NAT.
+The main iptables rule was:
+iptables -t nat -A POSTROUTING -s 192.168.57.0/24 -o eth1 -j MASQUERADE
 
-I added a third VM named printer to the Vagrantfile. To give it a static IP, I specified the MAC address 080027112233 in the Vagrant configuration. 
+On the clients, I deleted the old default route and set the server as the new default gateway:
+sudo ip r del default via 10.0.2.2
+sudo ip r add default via 192.168.57.10
 
-Then, I went back to the DHCP server and added a host declaration in /etc/dhcp/dhcpd.conf. I linked the MAC address (using colons) to the fixed IP 192.168.57.111 and set a default lease time of 2 hours (7200 seconds). 
-
-I restarted the DHCP service and logged into the printer. I used dhclient -r to release any old IP and dhclient to request a new one. I ran ip a and confirmed the printer got the .111 IP successfully.
-
-
-Checkpoint 5: Routing and NAT
-
-To finish the setup, I configured the Linux server to act as a router for the internal network. I enabled IP forwarding by writing 1 to /proc/sys/net/ipv4/ip_forward and uncommenting the line in /etc/sysctl.conf to make it permanent. Then, I added an iptables NAT rule to masquerade the traffic from the 192.168.57.0/24 network going out through the eth1 interface.
-
-Finally, I tested this on the client c1. I deleted its old default route and added a new default route pointing to the server's IP (192.168.57.10). I ran a ping test to 8.8.8.8, and it successfully received replies, proving that the internal clients now have internet access.
+Finally, I tested the internet connection from the clients:
+ping -c 4 8.8.8.8
+Result: 4 packets transmitted, 4 received, 0% packet loss.
+This confirmed that the routing and NAT configuration was working perfectly.
